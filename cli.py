@@ -2,8 +2,11 @@
 Presonal Python command line utilities
 '''
 
+MUSIC_DIR = "/home/kstock/Music/"
+
 import discogs_client as discogs
-import sys
+import subprocess
+import sys,os
 
 discogs.user_agent = 'quickShellUtilsForMe'
 
@@ -55,6 +58,17 @@ def get_genres2(query = 'Black Moth Super Rainbow|Cobra Juicy'):
                         return
 
     print 'no results'
+
+def cur_song_dir(music_dir=None):
+    '''Go to the dir that contains currently playing song in mpd   '''
+    if music_dir is None:
+        music_dir = MUSIC_DIR
+
+    song = subprocess.check_output('mpc -f "%file%" current',shell=True)
+    song_dir = music_dir + os.path.dirname(song)
+    print song_dir
+
+    return song_dir
 
 
 if __name__ == '__main__':

@@ -75,3 +75,10 @@ function bgf() {
         awk '{a[$0]++}END{for(x in a) printf("%20s|%s\n", x, a[x])}' <(beet ls -a -f '$genre') | sort 
     fi
 }
+
+
+function cdm(){
+    SONG_DIR=$(python -c 'from cli import cur_song_dir;cur_song_dir()')
+    #echo $SONG_DIR
+    cd $SONG_DIR
+}
