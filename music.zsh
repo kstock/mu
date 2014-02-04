@@ -78,7 +78,5 @@ function bgf() {
 
 
 function cdm(){
-    SONG_DIR=$(python -c 'from cli import cur_song_dir;cur_song_dir()')
-    #echo $SONG_DIR
-    cd $SONG_DIR
+    cd "$(python -c 'from cli import cur_song_dir;cur_song_dir()')"
 }

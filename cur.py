@@ -1,16 +1,20 @@
 #!/usr/bin/env python
 
 """
-Lyle Scott, III
-lyle@digitalfoo.net
+curses interface for rating songs using mpdcrons eugene
 
-A simple demo that uses curses to scroll the terminal.
+I used this repo as a skeleton:
+https://github.com/LyleScott/Python-curses-Scrolling-Example/
+
 TODO:
-    not reset when switch to artist view
-    if have never played song before, then tracks wont appear...
+    not reset when switch to artist view,actually have workable artist view
+    punctuation causes errors?,stop that
+    if have never played song before, then tracks wont appear...?
     not exception when resize in tmux?
     o -> goto current playing
-    wrap around
+    start at current song in middle of screen as much as nice and possible
+    wrap around scrolling
+    interact with database to keep track of more rating metadata(when rated,reratings),album stats
 """
 import curses
 import sys
@@ -77,6 +81,7 @@ class MenuDemo(object):
 
     TO_TOP        = ord('g')
     TO_BOTTOM     = ord('G')
+    TO_PLAYING    = ord('o')
     DEBUG         = ord('d')
     DEBUG_EVERY   = ord('D')
     RESET         = ord('r')
@@ -176,6 +181,11 @@ class MenuDemo(object):
             #motion long ways
             elif c == self.TO_TOP:
                 self.to_index(0)
+            elif c == self.TO_PLAYING:#TODO
+                self.current_song = self.get_current_song()
+                #self.topLineNum       = self.nOutputLines - self.current_song
+                #self.nextLineNum      = self.current_song
+                #self.highlightLineNum = self.current_song - 1
             elif c == self.TO_BOTTOM:
                 self.topLineNum       = self.nOutputLines - curses.LINES
                 self.nextLineNum      = curses.LINES
@@ -571,7 +581,7 @@ if __name__ == '__main__':
 
         if force:
             subprocess.check_output( change_rating , shell=True)
-            print 'after',subprocess.check_output( display , shell=True)
+            print 'after |',subprocess.check_output( display , shell=True)
             num_modified += 1
             continue
 
@@ -580,7 +590,7 @@ if __name__ == '__main__':
         do_this = choice_of_options('want to execute this command?',['y','n','q','f'])
         if do_this in ['y','f']:
             print subprocess.check_output( change_rating , shell=True)
-            print 'after',subprocess.check_output( display , shell=True)
+            print 'after |',subprocess.check_output( display , shell=True)
             num_modified += 1
         elif do_this == 'q':
             exit()
