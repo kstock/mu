@@ -1,12 +1,10 @@
 import urwid
 import subprocess
 import re
+import logging,sys
 
 urwid.Widget._command_map['k'] = urwid.CURSOR_UP
 urwid.Widget._command_map['j'] = urwid.CURSOR_DOWN
-
-
-choices = u'Chapman Cleese Gilliam Idle Jones Palin'.split()
 
 r_title       = re.compile(r'Last_Played.*? (.*)')
 r_album_title = re.compile(r'Rating:[0-9]+ (.*)')
@@ -14,6 +12,19 @@ r_title_unplayed = re.compile(r'Karma:[0-9]+ (.*)')
 
 r_rating      = re.compile(r'Rating:([0-9]+)')
 r_play_count  = re.compile(r'Play_Count:([0-9]+)')
+
+fname = '/home/kstock/workspace/mu/foo.log'
+logging.basicConfig(filename=fname,level=logging.DEBUG)
+logger = logging.getLogger(fname)
+# Configure logger to write to a file...
+
+def my_handler(_, value, __):
+    '''force all uncaught exceptions go to logger'''
+    logger.exception("Uncaught exception: {0}".format(str(value)))
+
+# Install exception handler
+sys.excepthook = my_handler
+
 def extract(regex,line,default=''):
     ''' extract first match of regex in line, else give default value'''
     txt = regex.findall(line)
@@ -21,6 +32,17 @@ def extract(regex,line,default=''):
         return txt[0]
     else:
         return default
+
+def get_title(text):
+    title = extract(r_title,text,'') or extract(r_album_title,text,'')
+    if r_title_unplayed.match(title):
+        title = extract(r_title_unplayed,title,'')
+    return title
+
+def get_current_song():
+    query = "eugene listinfo"
+    line  = subprocess.check_output(query,shell=True)
+    return get_title(line)
 
 def process_line(line,i,r_title=None):
 
@@ -55,52 +77,86 @@ def process_line(line,i,r_title=None):
 
     return proc
 
+def getOutputLines(rate_album=True):
+
+    '''Get the list of songs to potentially edit. if rate_album then get album song, else get all artists songs  '''
+    outputLines = []
+    if rate_album:#TODO if album is mapped to 2 different artists.
+        #query = subprocess.check_output('''mpc -f 'artist="%artist%" and album="%album%"' current''',shell=True)
+        query = subprocess.check_output('''mpc -f 'album="%album%"' current''',shell=True)
+    else:
+        query = subprocess.check_output('''mpc -f 'artist="%artist%"' current''',shell=True)
+
+    outputLines.extend( subprocess.check_output("eugene listinfo '" + query.strip() + "'", shell=True).split('\n') )
+
+    #add 2 for offset from album name, separator line
+    outputLines = [ l for l  in outputLines if l]
+
+
+
+    #outputLines = [ process_line(l,i+2) for i,l in enumerate(outputLines)]
+    outputLines = [ Song(l) for i,l in enumerate(outputLines)]
+    #outputLines = [ Song(str(i)) for i,l in enumerate(outputLines)]
+    #outputLines = [ urwid.Text(l) for i,l in enumerate(outputLines)]
+
+    #l = subprocess.check_output('eugene listinfo -A',shell=True).strip()
+    #outputLines.insert(0, l)
+
+    return outputLines
+
 class Score(urwid.IntEdit):
 
-    def __init__(self,text,default='__'):
-        self.original_rating = default
+    def __init__(self,text,default='00'):
         self.dirty = False
-        super(Score,self).__init__(text,default)
+
+        self.original_rating = default
+        self.rating          = default
+        display = self.get_display(default)
+        super(Score,self).__init__(text,display)
+
+    def commit(self):
+        self.original_rating = self.rating
+        self.dirty = False
+        return int(self.rating)
+
 
     def clean(self):
-        self.set_edit_text(self.original_rating)
+        self.set_edit_text(self.get_display(self.original_rating))
+        self.rating = self.original_rating
         self.dirty = False
 
-    def keypress(self,size,key):
+    def alter_score(self,original,new):
+        if original == 0 and not new:
+            return self.original_rating
+        return str( int( original+new) ).zfill(2)
 
+    def get_display(self,rating):
+        if int(rating) == 0:
+            return '__'
+
+        return rating.zfill(2)
+
+    def keypress(self,size,key):
+        '''A rating is between 0-10, and is either dirty (changed from database
+        since program start) or clean (unchanged)'''
+
+        new_rating = self.rating
         if key.isdigit():
 
-            if not self.dirty:
-                self.set_edit_text('')
-
-            self.dirty = True
-
-            if int(self.edit_text + key) <= 10:
-                key = super(Score,self).keypress(size,key)
+            if int(self.rating + key) <= 10:
+                new_rating = self.alter_score(self.rating,key)
             else:
-                self.set_edit_text(self.edit_text[-1:])
+                new_rating = self.alter_score('',key)
 
         elif key == 'backspace':
-            if self.dirty:
-                key = super(Score,self).keypress(size,key)
+            new_rating = self.alter_score(self.rating[:-1],'')
 
-        if not self.edit_text and self.dirty:
-            self.set_edit_text( self.original_rating )
-            self.dirty = False
+        self.rating = new_rating
+        self.dirty = self.original_rating != self.rating
+        self.set_edit_text(self.get_display(new_rating))
 
         return key
 
-
-def get_title(text):
-    title = extract(r_title,text,'') or extract(r_album_title,text,'')
-    if r_title_unplayed.match(title):
-        title = extract(r_title_unplayed,title,'')
-    return title
-
-def get_current_song():
-    query = "eugene listinfo"
-    line  = subprocess.check_output(query,shell=True)
-    return get_title(line)
 
 class Song(urwid.WidgetWrap):
     def __init__(self,text):
@@ -108,19 +164,15 @@ class Song(urwid.WidgetWrap):
 
         self.play_count      = extract(r_play_count,text,'')
         self.original_rating = extract(r_rating,text,'').zfill(2)
+        self.rating          = self.original_rating
         self.playing         = False
-
-        if self.original_rating == '00':
-            self.rating = '__'
-        else:
-            self.rating = self.original_rating
 
         self.title = get_title(text)
 
         self.txt = ''.join(['|',self.play_count,'|',self.title])
-        listbox = [ (3,urwid.AttrMap(Score("",default=self.rating),None,None)),
-                    (len(self.txt),urwid.Text(self.txt)),
-                    (9,urwid.AttrMap(urwid.Text(''),None,None)),
+        listbox = [ (3,urwid.AttrMap(Score("",default=self.rating),None,None)), #Score
+                    (len(self.txt),urwid.Text(self.txt)),                       #song name
+                    (9,urwid.AttrMap(urwid.Text(''),None,focus_map={None:'reversed'})),                #dirt
                     ]
         w = urwid.Columns(listbox)
         super(Song,self).__init__(w)
@@ -137,14 +189,17 @@ class Song(urwid.WidgetWrap):
     def commit(self):
         if self.score.original_widget.dirty:
 
-            query = (self.rating, ''' 'uri="%s"' '''% (self.title) )
+            new_rating = self.score.original_widget.commit()
+            query = (new_rating, ''' 'uri="%s"' '''% (self.title) )
             change_rating = "eugene rateabs %s %s " % query
-            print subprocess.check_output( change_rating , shell=True)
+            logging.critical(change_rating)
+            #out = subprocess.check_output( change_rating , shell=True)
 
     def keypress(self,size,key):
 
         key = super(Song,self).keypress(size,key)
         if key == 'd':
+            #self.score.rating = self.score.original_rating
             self.score.original_widget.clean()
         elif key == 'c':
             self.commit()
@@ -162,24 +217,10 @@ class Song(urwid.WidgetWrap):
         return key
 
 
+class Album(Song):
+    def __init__(self,text):
+        super(Song,self).__init__(text)
 
-def getOutputLines(rate_album=True):
-    '''Get the list of songs to potentially edit. if rate_album then get album song, else get all artists songs  '''
-    outputLines = []
-    if rate_album:#TODO if album is mapped to 2 different artists.
-        #query = subprocess.check_output('''mpc -f 'artist="%artist%" and album="%album%"' current''',shell=True)
-        query = subprocess.check_output('''mpc -f 'album="%album%"' current''',shell=True)
-    else:
-        query = subprocess.check_output('''mpc -f 'artist="%artist%"' current''',shell=True)
-    outputLines.extend( subprocess.check_output("eugene listinfo '" + query.strip() + "'", shell=True).split('\n') )
-
-    #add 2 for offset from album name, separator line
-    outputLines = [ l for l  in outputLines if l]
-    #outputLines = [ process_line(l,i+2) for i,l in enumerate(outputLines)]
-    outputLines = [ Song(l) for i,l in enumerate(outputLines)]
-    #outputLines = [ Song(str(i)) for i,l in enumerate(outputLines)]
-    #outputLines = [ urwid.Text(l) for i,l in enumerate(outputLines)]
-    return outputLines
 
 choices = getOutputLines()
 
@@ -197,9 +238,20 @@ def menu(title, choices):
 
 class SongList(urwid.ListBox):
 
-    def __init__(self,body):
+    def __init__(self,body,kind='album'):
 
         super(SongList,self).__init__(body)
+        self.current_song_i = 0
+        self.current_song   = get_current_song()
+        self.highlight_current()
+        self.kind='album'
+
+    def update(self):
+        '''update list based on current playing album'''
+        body = getOutputLines()
+        self.body = urwid.SimpleFocusListWalker([
+                        urwid.AttrMap(c, None, focus_map='reversed')
+                        for c in body])
         self.current_song_i = 0
         self.current_song   = get_current_song()
         self.highlight_current()
@@ -245,8 +297,10 @@ class SongList(urwid.ListBox):
             self.sort(lambda x: (x.original_widget.play_count, int(x.original_widget.original_rating)),reverse=True)
         elif key == 'C':
             self.commit()
+        elif key == 'U':
+            self.update()
 
-        if key in ['s','p','d','D']:
+        if key in ['o']:#'o','p','d','D']:
             cursong = get_current_song()
             if cursong != self.current_song:
                 self.rm_highlight(self.current_song_i)
@@ -255,29 +309,6 @@ class SongList(urwid.ListBox):
 
         key = super(SongList,self).keypress(size,key)
         return key
-
-class myIntEdit(urwid.IntEdit):
-
-    def keypress(self,size,key):
-
-        if key.isdigit():
-            if int(self.edit_text + key) > 10:
-                self.edit_text = "0"
-
-            if len(self.edit_text) > 1:
-                self.edit_text = self.edit_text[-1:]
-            key = super(myIntEdit,self).keypress(size,key)
-
-        return key
-
-
-    #def keypress(self,size,key):
-        #if key =="j":
-            #super(urwid.IntEdit,self).keypress(size, '0')
-        #else:
-            #super(urwid.IntEdit,self).keypress(size,key)
-
-
 
 
 def item_chosen(button, choice):
@@ -313,3 +344,16 @@ palette = [
 
 #urwid.MainLoop(top, palette=[('reversed', 'standout', '')],unhandled_input=unhandled_input).run()
 urwid.MainLoop(top, palette=palette,unhandled_input=unhandled_input).run()
+'''
+import re
+import subprocess
+res =[]
+for s in songs[-45:-41]:
+    if re.search(r"'",s):
+        res.append('error:'+s)
+    else:
+        foo = 'eugene listinfo 'uri="%s"' '  % s.strip()
+        print foo
+        res.append(subprocess.check_output(foo,shell=True))
+'''
+
