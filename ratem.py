@@ -1,3 +1,4 @@
+from __future__ import division
 import urwid
 import subprocess
 import re
@@ -77,6 +78,13 @@ def process_line(line,i,r_title=None):
 
     return proc
 
+def clean_quotes(text):
+    ''' deal with titles that include quotes '''
+    if "'" not in text:
+        return text
+
+
+
 def getOutputLines(rate_album=True):
 
     '''Get the list of songs to potentially edit. if rate_album then get album song, else get all artists songs  '''
@@ -99,10 +107,11 @@ def getOutputLines(rate_album=True):
     #outputLines = [ Song(str(i)) for i,l in enumerate(outputLines)]
     #outputLines = [ urwid.Text(l) for i,l in enumerate(outputLines)]
 
-    #l = subprocess.check_output('eugene listinfo -A',shell=True).strip()
+    outputLines.insert(0, Album(subprocess.check_output('eugene listinfo -A',shell=True).strip()) )
     #outputLines.insert(0, l)
 
     return outputLines
+
 
 class Score(urwid.IntEdit):
 
@@ -116,7 +125,7 @@ class Score(urwid.IntEdit):
 
     def commit(self):
         self.original_rating = self.rating
-        self.dirty = False
+        self.clean()
         return int(self.rating)
 
 
@@ -126,7 +135,7 @@ class Score(urwid.IntEdit):
         self.dirty = False
 
     def alter_score(self,original,new):
-        if original == 0 and not new:
+        if original == '0' and not new:
             return self.original_rating
         return str( int( original+new) ).zfill(2)
 
@@ -169,14 +178,17 @@ class Song(urwid.WidgetWrap):
 
         self.title = get_title(text)
 
+        listbox = self.get_pieces()
+        w = urwid.Columns(listbox)
+        super(Song,self).__init__(w)
+
+    def get_pieces(self):
         self.txt = ''.join(['|',self.play_count,'|',self.title])
         listbox = [ (3,urwid.AttrMap(Score("",default=self.rating),None,None)), #Score
                     (len(self.txt),urwid.Text(self.txt)),                       #song name
                     (9,urwid.AttrMap(urwid.Text(''),None,focus_map={None:'reversed'})),                #dirt
                     ]
-        w = urwid.Columns(listbox)
-        super(Song,self).__init__(w)
-
+        return listbox
 
     @property
     def score(self):
@@ -184,16 +196,24 @@ class Song(urwid.WidgetWrap):
 
     @property
     def dirt(self):
-        return self._w.contents[2][0]
+        return self._w.contents[-1][0]
 
     def commit(self):
         if self.score.original_widget.dirty:
 
             new_rating = self.score.original_widget.commit()
-            query = (new_rating, ''' 'uri="%s"' '''% (self.title) )
-            change_rating = "eugene rateabs %s %s " % query
+            change_rating = self.get_query(new_rating)
             logging.critical(change_rating)
-            #out = subprocess.check_output( change_rating , shell=True)
+            out = subprocess.check_output( change_rating )#, shell=True)
+
+    def get_query(self, new_rating):
+        query = (new_rating, r''' 'uri="%s"' '''% (self.title) )
+
+
+        safe_title = 'uri="' + re.sub("'",'''\'''', self.title) + '"'
+        change_rating =  ["eugene","rateabs", str(new_rating) , safe_title]
+        #change_rating = r"eugene rateabs %s %s " % query
+        return change_rating
 
     def keypress(self,size,key):
 
@@ -203,12 +223,11 @@ class Song(urwid.WidgetWrap):
             self.score.original_widget.clean()
         elif key == 'c':
             self.commit()
-            self.score.original_widget.clean()
 
         if self.score.original_widget.dirty:
             self.score.set_attr_map({None:'dirty'})
             self.dirt.set_attr_map({None:'dirty'})
-            self.dirt.original_widget.set_text("Dirty(%s)" % self.original_rating)
+            self.dirt.original_widget.set_text("Dirty(%s)" % self.score.original_widget.original_rating)
         else:
             self.score.set_attr_map({None:''})
             self.dirt.set_attr_map({None:''})
@@ -219,8 +238,42 @@ class Song(urwid.WidgetWrap):
 
 class Album(Song):
     def __init__(self,text):
-        super(Song,self).__init__(text)
+        super(Album,self).__init__(text)
 
+    def get_pieces(self):
+        pieces = super(Album,self).get_pieces()
+
+        dirt   = pieces[-1]
+        pieces = pieces[:-1]
+
+        higher_than = "|#>5:"
+        median      = '|median:'
+        average     = '|average:'
+
+        self.avg = urwid.AttrMap(urwid.Edit(average),{None:''},{None:''})
+        self.med = urwid.AttrMap(urwid.Edit(median),{None:''},{None:''})
+        self.gt  =  urwid.AttrMap(urwid.Edit(higher_than   ),{None:''},{None:''})
+        pieces.extend([
+         (len(average) + 4,           self.avg),
+         (len(median)      + 2,           self.med),
+         (len(higher_than)     + 2,           self.gt ),
+                    dirt,]
+                    )
+        return pieces
+
+    def compute_stats(self,songs):
+        scores = [int(s.score.original_widget.rating) for s in songs]
+        scores = [s for s in scores if s != 0]#only count rated songs
+        self.avg.original_widget.set_edit_text( str(sum(scores) / (len(scores) or 1 ) )[:4])#truncate to 4 chars
+        self.gt.original_widget.set_edit_text( str( len([s for s in scores if s > 5]) ) )
+        if scores:
+            self.med.original_widget.set_edit_text(str( scores[ len(scores) // 2 ] ) )
+
+
+    def get_query(self,new_rating):
+        #query = (new_rating, ''' 'uri="%s"' '''% (self.title) )
+        change_rating = "eugene rateabs -A %s " % new_rating
+        return change_rating.split()
 
 choices = getOutputLines()
 
@@ -244,7 +297,11 @@ class SongList(urwid.ListBox):
         self.current_song_i = 0
         self.current_song   = get_current_song()
         self.highlight_current()
-        self.kind='album'
+        self.kind = kind
+        if kind == 'album':#first line should be album,we need stats!
+            self.body[0].original_widget.compute_stats(
+                    [x.original_widget for x in self.body]
+                     )
 
     def update(self):
         '''update list based on current playing album'''
@@ -280,13 +337,15 @@ class SongList(urwid.ListBox):
     def commit(self):
         print self.get_focus
 
+    def apply_all(self,func):
+        for b in self.body:
+            func(b)
+
+
     def keypress(self,size,key):
         if key in ['D']:
             for b in self.body:
                 b.keypress(size,'d')
-        elif key == 'o':
-            get_current_song()
-            self.goto('current')
         elif key == 'g':
             self.goto(0)
         elif key == 'G':
@@ -296,16 +355,23 @@ class SongList(urwid.ListBox):
         elif key == 'p':
             self.sort(lambda x: (x.original_widget.play_count, int(x.original_widget.original_rating)),reverse=True)
         elif key == 'C':
-            self.commit()
+            self.apply_all(lambda x:x.original_widget.keypress(size,'c'))
         elif key == 'U':
             self.update()
 
-        if key in ['o']:#'o','p','d','D']:
+        if key in ['o','c'] or key.isdigit():#'o','p','d','D']:
             cursong = get_current_song()
             if cursong != self.current_song:
                 self.rm_highlight(self.current_song_i)
                 self.current_song = cursong
                 self.highlight_current()
+
+            self.body[0].original_widget.compute_stats(
+                    [x.original_widget for x in self.body]
+                    )
+        if key == 'o':
+
+            self.goto('current')
 
         key = super(SongList,self).keypress(size,key)
         return key
