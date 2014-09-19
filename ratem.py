@@ -2,21 +2,29 @@ from __future__ import division
 import urwid
 import subprocess
 import re
+import os
 import logging,sys
 
 urwid.Widget._command_map['k'] = urwid.CURSOR_UP
 urwid.Widget._command_map['j'] = urwid.CURSOR_DOWN
 
-r_title       = re.compile(r'Last_Played.*? (.*)')
-r_album_title = re.compile(r'Rating:[0-9]+ (.*)')
+r_title          = re.compile(r'Last_Played.*? (.*)')
+r_album_title    = re.compile(r'Rating:[0-9]+ (.*)')
 r_title_unplayed = re.compile(r'Karma:[0-9]+ (.*)')
 
 r_rating      = re.compile(r'Rating:([0-9]+)')
 r_play_count  = re.compile(r'Play_Count:([0-9]+)')
 
-fname = '/home/kstock/workspace/mu/foo.log'
+HOME = os.path.expanduser('~')
+MU_PATH = '/'.join( ( HOME, 'workspace/mu/') )
+
+fname = '/'.join( ( MU_PATH, 'foo.log') )
 logging.basicConfig(filename=fname,level=logging.DEBUG)
 logger = logging.getLogger(fname)
+
+commit_record_handler = logging.FileHandler( '/'.join( (MU_PATH, "commit_record.log") ))
+commit_record_handler.setLevel(logging.INFO)
+logger.addHandler(commit_record_handler)
 # Configure logger to write to a file...
 
 def my_handler(_, value, __):
@@ -205,14 +213,13 @@ class Song(urwid.WidgetWrap):
             change_rating = self.get_query(new_rating)
             logging.critical(change_rating)
             out = subprocess.check_output( change_rating )#, shell=True)
+            logging.info(str(change_rating))
+            logging.info(out)
+
 
     def get_query(self, new_rating):
-        query = (new_rating, r''' 'uri="%s"' '''% (self.title) )
-
-
-        safe_title = 'uri="' + re.sub("'",'''\'''', self.title) + '"'
+        safe_title = 'uri="' + re.sub("'",'''\'''', self.title) + '"' #"#undoes messed up syntax highlighting from this line
         change_rating =  ["eugene","rateabs", str(new_rating) , safe_title]
-        #change_rating = r"eugene rateabs %s %s " % query
         return change_rating
 
     def keypress(self,size,key):
