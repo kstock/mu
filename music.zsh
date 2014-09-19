@@ -3,9 +3,11 @@
 #
 #
 #aliases{{{
-alias bran='beet random -a -n 100 L'
+#alias bran='beet random -a -n 100 L'
+alias bran='python ~/workspace/mu/bran.py'
 alias currSong='qdbus org.mpris.clementine /Player org.freedesktop.MediaPlayer.GetMetadata'
 alias lsong="sqlite3 -line ~/.mpdcron/stats.db 'select artist,title from song order by last_played desc limit 5'"
+alias ra="python ~/workspace/mu/ratem.py"
 #aliases}}}
 #
 #
@@ -16,11 +18,17 @@ alias lsong="sqlite3 -line ~/.mpdcron/stats.db 'select artist,title from song or
 function eli(){
     awk '{gsub("(^[0-9]+|Love:|Kill|Karma.)..","",$0 );print $0}' <(eugene listinfo) }
 
+#print rating for current playing song
+function currate(){
+eugene listinfo | awk '{gsub("Rating:","",$5);print ($5)}'
+}
 
 function elia_part(){
     awk '{gsub("(^[0-9]+|Love:|Kill|Karma.)..","",$0 );print $0}'  <(eugene listinfo -A)
-    query=$(mpc -f 'artist="%artist%" and album="%album%"' current)
+    #query=$(mpc -f 'artist="%artist%" and album="%album%"' current)
+    query=$(mpc -f 'album="%album%"' current)
     awk '{gsub("(^[0-9]+|Love:|Kill|Karma.)..","",$0 ); if (NF >0) {print($0)};}'  <(eugene listinfo $query)
+    #eugene listinfo $query
 
 }
 
