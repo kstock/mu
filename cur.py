@@ -31,7 +31,7 @@ logging.basicConfig(filename=fname,level=logging.DEBUG)
 logger = logging.getLogger(fname)
 # Configure logger to write to a file...
 
-def my_handler(typ, value, tb):
+def my_handler(_, value, __):
     '''force all uncaught exceptions go to logger'''
     logger.exception("Uncaught exception: {0}".format(str(value)))
 
@@ -79,22 +79,22 @@ class MenuDemo(object):
     ESC_KEY     = 27
     ENTER       = curses.KEY_ENTER
 
-    TO_TOP        = ord('g')
-    TO_BOTTOM     = ord('G')
-    TO_PLAYING    = ord('o')
-    DEBUG         = ord('d')
-    DEBUG_EVERY   = ord('D')
-    RESET         = ord('r')
-    RESET_AND_QUIT= ord('R')
-    UNDO          = ord('u')
-    ARTIST_TOGGLE = ord('A')
+    TO_TOP         = ord('g')
+    TO_BOTTOM      = ord('G')
+    TO_PLAYING     = ord('o')
+    DEBUG          = ord('d')
+    DEBUG_EVERY    = ord('D')
+    RESET          = ord('r')
+    RESET_AND_QUIT = ord('R')
+    UNDO           = ord('u')
+    ARTIST_TOGGLE  = ord('A')
 
-    DOWN_KEYS     = [curses.KEY_DOWN,ord('j')]
-    UP_KEYS       = [curses.KEY_UP,ord('k')]
-    QUIT_KEYS     = [ESC_KEY,ord('q')]
-    FORCE_QUIT    = ord('Q')#do not prompt user to validate any modifications
+    DOWN_KEYS      = [curses.KEY_DOWN,ord('j')]
+    UP_KEYS        = [curses.KEY_UP,ord('k')]
+    QUIT_KEYS      = [ESC_KEY,ord('q')]
+    FORCE_QUIT     = ord('Q')#do not prompt user to validate any modifications
 
-    ALLOWED_INPUT = [ord(str(n)) for n in range(0,10)]
+    ALLOWED_INPUT  = [ord(str(n)) for n in range(0,10)]
     ALLOWED_INPUT.append( curses.KEY_BACKSPACE )
 
     SEP = '|'
@@ -153,20 +153,17 @@ class MenuDemo(object):
 
     def run(self):
         ''' interact with menu, in the end it returns the modified indexes w ratings'''
-        running = True
         force   = False
-        while running:
+        while True:
             self.displayScreen()
             # get user command
             c = self.screen.getch()
 
             if c == self.FORCE_QUIT:#quit and force all changes without user check
                 force   = True
-                running = False
-                continue
+                break
             elif c in self.QUIT_KEYS:
-                running = False
-                continue
+                break
 
             #edit ratings
             if c == curses.KEY_BACKSPACE:
@@ -188,8 +185,8 @@ class MenuDemo(object):
                 #self.highlightLineNum = self.current_song - 1
             elif c == self.TO_BOTTOM:
                 self.topLineNum       = self.nOutputLines - curses.LINES
-                self.nextLineNum      = curses.LINES
-                self.highlightLineNum = curses.LINES - 1
+                self.nextLineNum      = self.nOutputLines
+                self.highlightLineNum = self.nOutputLines - 1
             #misc
             elif c == self.DEBUG:
                 self.debug_print()
@@ -199,7 +196,7 @@ class MenuDemo(object):
                 self.reset()
             elif c == self.RESET_AND_QUIT:
                 self.reset()
-                running = False
+                break
             elif c == self.UNDO:
                 self.undo()
             elif c == self.ARTIST_TOGGLE:
@@ -271,8 +268,9 @@ class MenuDemo(object):
     def getOutputLines(self,rate_album=True):
         '''Get the list of songs to potentially edit. if rate_album then get album song, else get all artists songs  '''
         self.outputLines = []
-        if rate_album:
-            query = subprocess.check_output('''mpc -f 'artist="%artist%" and album="%album%"' current''',shell=True)
+        if rate_album:#TODO if album is mapped to 2 different artists.
+            #query = subprocess.check_output('''mpc -f 'artist="%artist%" and album="%album%"' current''',shell=True)
+            query = subprocess.check_output('''mpc -f 'album="%album%"' current''',shell=True)
         else:
             query = subprocess.check_output('''mpc -f 'artist="%artist%"' current''',shell=True)
         logging.critical(query)
@@ -356,7 +354,9 @@ class MenuDemo(object):
 
             start_char_index += len(line)
             if linenum in self.dirty:
+                logging.debug(self.original)
                 dirt = '|dirty(%s)' % self.original.get(linenum,0)
+                logging.debug(dirt)
                 self.screen.addstr(index, start_char_index, dirt, curses.color_pair(curses.COLOR_RED) )#| curses.A_BOLD)
 
         self.screen.refresh()
@@ -375,23 +375,35 @@ class MenuDemo(object):
             self.topLineNum += self.UP
             #self.topLineNum = self.topLineNum % self.nOutputLines
             return
-        elif increment == self.DOWN and nextLineNum == curses.LINES and (self.topLineNum+curses.LINES) != self.nOutputLines:
+        elif increment == self.DOWN and nextLineNum >= curses.LINES and (self.topLineNum+curses.LINES) < self.nOutputLines:
             self.topLineNum += self.DOWN
-            #self.topLineNum = self.topLineNum % self.nOutputLines
+            self.highlightLineNum += self.DOWN
+            logging.critical('here')
+        elif increment == self.DOWN and (self.topLineNum+curses.LINES) == self.nOutputLines:
+            logging.critical('there')
             return
+        #elif increment == self.DOWN and nextLineNum == curses.LINES and (self.topLineNum+curses.LINES) == self.nOutputLines:
+        #elif increment == self.DOWN and (self.topLineNum+curses.LINES) != self.nOutputLines:
+            #self.topLineNum += self.DOWN
+            #logging.critical('there')
+            #self.topLineNum = self.topLineNum % self.nOutputLines
+            #return
 
         logging.debug( (increment == self.DOWN,(self.topLineNum+self.highlightLineNum+1 )!= self.nOutputLines , self.highlightLineNum != curses.LINES))
         # scroll highlight line
         if increment == self.UP and (self.topLineNum != 0 or self.highlightLineNum != 0):
             self.highlightLineNum = nextLineNum
         elif increment == self.DOWN and (self.topLineNum+self.highlightLineNum+1) != self.nOutputLines and self.highlightLineNum != curses.LINES:
-            self.highlightLineNum = nextLineNum
+                self.highlightLineNum = nextLineNum
 
     def restoreScreen(self):
-        curses.initscr()
-        curses.nocbreak()
-        curses.echo()
-        curses.endwin()
+        if not curses:
+            print 'huh?'
+        else:
+            curses.initscr()
+            curses.nocbreak()
+            curses.echo()
+            curses.endwin()
 
     # catch any weird termination situations
     def __del__(self):
@@ -490,6 +502,8 @@ class MenuDemo(object):
             if self.r_title_unplayed.match(title):
                 title = extract(self.r_title_unplayed,title,'')
 
+            #title = re.sub("'",r"\'",title)
+
             self.filename_id[i]     = title
             self.filename_id[title] = i
             proc += title
@@ -520,7 +534,7 @@ class MenuDemo(object):
         for linenum,new_rating in self.dirty.iteritems():
             #query = '''eugene listinfo %s "uri='%s'"'''% (new_rating,self.filename_id[linenum])
             #identifying search, new rating)
-            query = (''' "uri='%s'" '''% (self.filename_id[linenum]),new_rating)
+            query = (''' 'uri="%s"' '''% (self.filename_id[linenum]),new_rating)
             logging.critical(linenum)
             logging.critical(query)
 
@@ -574,6 +588,7 @@ if __name__ == '__main__':
         txt = [l for l in subprocess.check_output( display , shell=True).split('\n') if l]
         if len(txt) != 1:
             print 'I dont think this query is unique to this song : ( skipping, sorry'
+            print len(txt)
             continue
         else:
             txt = txt[0]
